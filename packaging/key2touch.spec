@@ -11,7 +11,7 @@
 
 Name:           key2touch
 Version:        %{snapdate}
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Map keyboard keys to touchscreen input on Wayland
 License:        GPL-3.0-or-later
 URL:            https://github.com/SHORiN-KiWATA/key2touch
@@ -27,8 +27,8 @@ Requires:       python3-evdev
 Requires:       python3-gobject
 Requires:       python3-cairo
 Requires:       gtk4
-Requires:       libadwaita
-Requires:       gtk4-layer-shell
+Requires:       libadwaita >= 1.5
+Requires:       gtk4-layer-shell >= 1.0
 # udev rule that grants the input group access to /dev/uinput
 Requires:       systemd-udev
 # pkexec is used from the GUI to join the input group and repair uinput
@@ -57,12 +57,18 @@ install -d -m 0755 %{buildroot}%{python3_sitelib}
 cp -a key2touch %{buildroot}%{python3_sitelib}/
 find %{buildroot}%{python3_sitelib}/key2touch -name __pycache__ -type d -exec rm -rf {} +
 
-# Launcher (bin/key2touch): sets PYTHONPATH to dirname(dirname(realpath($0))).
-# With $0=/usr/bin/key2touch that adds /usr, which is harmless; the real
-# import path is site-packages.  Bytecode in-tree beats ~/.cache: the
-# launcher only forces PYTHONPYCACHEPREFIX when the tree is writable.
+# Launcher.  Upstream bin/key2touch derives PYTHONPATH from its own location
+# (site-packages install would add /usr and force bytecode into ~/.cache,
+# ignoring the precompiled tree we ship).  Install a thin wrapper that just
+# execs the module; key2touch/__main__.py handles the layer-shell preload and
+# keeps bytecode in-tree for a read-only prefix.
 install -d -m 0755 %{buildroot}%{_bindir}
-install -p -m 0755 bin/key2touch %{buildroot}%{_bindir}/key2touch
+cat > %{buildroot}%{_bindir}/key2touch <<'EOF'
+#!/bin/sh
+# key2touch RPM launcher (upstream bin/key2touch assumes a source checkout)
+exec /usr/bin/python3 -m key2touch "$@"
+EOF
+chmod 0755 %{buildroot}%{_bindir}/key2touch
 
 # Desktop entry + hicolor icon
 install -d -m 0755 %{buildroot}%{_datadir}/applications
@@ -129,6 +135,12 @@ exit 0
 %{_modulesloaddir}/key2touch-uinput.conf
 
 %changelog
+* Sun Nov 08 2026 quinovax <quinovax@users.noreply.github.com> - 20261104-2
+- Require libadwaita >= 1.5 (Adw.PreferencesDialog / Adw.AlertDialog) and
+  gtk4-layer-shell >= 1.0, per a source audit of the GUI modules.
+- Replace the source-checkout launcher with a site-packages-aware wrapper so
+  the shipped precompiled bytecode is actually used.
+
 * Sun Nov 08 2026 quinovax <quinovax@users.noreply.github.com> - 20261104-1
 - Initial Fedora packaging: git snapshot source; Python package installed to
   site-packages with build-time bytecode; udev rule granting /dev/uinput to
