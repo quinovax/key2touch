@@ -142,7 +142,32 @@ class Key2Touch(Adw.Application):
         self.hk_solo = False
         self.backend = desktop.detect()
         self.layer_shell = LS.is_supported()
+        # KWin + NVIDIA GL drops the alpha channel of GTK4 layer-shell
+        # transparent windows, so the HUD overlay renders as an opaque
+        # black canvas that the user cannot dismiss. Skip it entirely.
+        self.overlay_broken = self._compositor_breaks_overlay()
         self.synced_after_start = False
+
+    @staticmethod
+    def _compositor_breaks_overlay() -> bool:
+        """True when GTK4 transparent layer-shell windows render as opaque
+        black (KWin + NVIDIA GL on Wayland)."""
+        if os.environ.get("XDG_SESSION_TYPE") != "wayland":
+            return False
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
+        if "KDE" not in desktop and "KWin" not in desktop:
+            return False
+        # Check for NVIDIA GPU
+        try:
+            for card in os.listdir("/sys/class/drm"):
+                dev = os.path.join("/sys/class/drm", card, "device", "vendor")
+                if os.path.exists(dev):
+                    with open(dev) as f:
+                        if f.read().strip() == "0x10de":
+                            return True
+        except OSError:
+            pass
+        return False
 
     # ================================================================ model
     def profile_names(self):
@@ -620,9 +645,10 @@ class Key2Touch(Adw.Application):
 
         g = Adw.PreferencesGroup(title="外观")
         hud = Adw.SwitchRow(title="显示 HUD",
-                            subtitle=("在屏幕上显示按键位置，按下时高亮" if self.layer_shell
-                                      else "当前桌面不支持 wlr-layer-shell，HUD 不可用"),
-                            active=self.settings.get("hud", True), sensitive=self.layer_shell)
+                            subtitle=("在屏幕上显示按键位置，按下时高亮" if self.layer_shell and not self.overlay_broken
+                                      else "当前桌面合成器不支持透明 HUD 覆盖层，已禁用"),
+                            active=self.settings.get("hud", True),
+                            sensitive=self.layer_shell and not self.overlay_broken)
         row = Adw.ActionRow(title="HUD 不透明度", sensitive=self.layer_shell)
         opacity = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.15, 1.0, 0.05)
         opacity.set_value(self.settings.get("hud_opacity", 0.6))
@@ -998,6 +1024,8 @@ class Key2Touch(Adw.Application):
         # as an opaque black canvas the user cannot dismiss.
         if not self.profile["points"]:
             return
+        if self.overlay_broken:
+            return  # KWin + NVIDIA GL: GTK4 transparent overlay = black canvas
         self.hud = Overlay(self, edit=False)
         self.hud.present()
         self.update_hud()
