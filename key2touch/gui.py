@@ -992,15 +992,30 @@ class Key2Touch(Adw.Application):
             self.hud = None
         if not self.layer_shell:
             return  # HUD needs wlr-layer-shell (not available on e.g. GNOME)
+        # Only create the overlay when there is something to draw. An empty
+        # overlay is a fullscreen transparent window; on some GTK4 + KWin
+        # (NVIDIA GL) compositors that alpha is dropped and the window renders
+        # as an opaque black canvas the user cannot dismiss.
+        if not self.profile["points"]:
+            return
         self.hud = Overlay(self, edit=False)
         self.hud.present()
         self.update_hud()
 
     def update_hud(self):
-        if self.hud:
-            # Shown whenever mapping is on; dimmed while waiting for the game window.
-            self.hud.set_hud_visible(self.settings.get("hud", True) and self.engine_state.get("enabled", True),
-                                     dim=not self.engine_state.get("active", False))
+        show = (self.settings.get("hud", True) and self.engine_state.get("enabled", True)
+                and bool(self.profile["points"]))
+        if not show:
+            if self.hud:
+                self.hud.close()
+                self.hud = None
+            return
+        if not self.hud or self.hud.output != self.profile["output"]:
+            self.rebuild_hud()
+            return
+        self.hud.present()
+        # Shown whenever mapping is on; dimmed while waiting for the game window.
+        self.hud.set_hud_visible(True, dim=not self.engine_state.get("active", False))
 
     def on_edit(self, *_):
         if self.editor:
