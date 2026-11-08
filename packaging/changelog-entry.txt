@@ -1,0 +1,12 @@
+# Template for the next %changelog entry in key2touch.spec.
+# Replace the placeholders, then paste the block ABOVE the existing entries
+# (newest first).  Keep the blank line between the header and the items.
+# <Day>/<Mon> are three-letter English abbreviations — see `date +"%a %b %d"`.
+# <ver> is Version-Release, e.g. 20261104-2.  Each summary line starts with "- ".
+
+* <Day> <Mon> <DD> 2026 <maintainer> - <ver>
+- <summary line>
+
+# Worked example:
+# * Mon Jan 05 2026 quinovax <quinovax@users.noreply.github.com> - 20261104-2
+# - Rebuild for Fedora 45; refresh the snapshot commit; fix the udev rule path.
