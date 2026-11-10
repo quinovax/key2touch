@@ -6,14 +6,16 @@ needs a redraw when the profile changes.
 
 import copy
 import math
+import tempfile
 
 import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
+gi.require_version("Gio", "2.0")
 gi.require_version("Gtk4LayerShell", "1.0")
-from gi.repository import Gdk, GLib, Gtk, Gtk4LayerShell as LS  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, Gtk, Gtk4LayerShell as LS  # noqa: E402
 from evdev import ecodes as e  # noqa: E402
 
 from .mapper import MOD_GROUP, MOD_ORDER  # noqa: E402
@@ -72,6 +74,46 @@ def clamp(v, lo, hi):
     return min(max(v, lo), hi)
 
 
+def capture_desktop_snapshot():
+    # KWin + NVIDIA GL drops the alpha channel of GTK4 transparent layer-shell
+    # windows, so the editor renders as an opaque black canvas instead of
+    # dimming the desktop behind it.  Painting a snapshot of the desktop
+    # (captured before this window is mapped) as an opaque background below
+    # the 45% scrim restores the intended look without relying on alpha.
+    # Returns (surface, buffer, w, h, scale) or (None, None, 0, 0, 1.0).
+    # The buffer MUST be kept alive for as long as the surface is used.
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        proxy = Gio.DBusProxy.new_sync(
+            bus, Gio.DBusProxyFlags.NONE, None,
+            "org.kde.KWin", "/org/kde/KWin/ScreenShot2",
+            "org.kde.KWin.ScreenShot2", None)
+        with tempfile.TemporaryFile() as f:
+            fds = Gio.UnixFDList.new()
+            idx = fds.append(f.fileno())
+            opts = {"include-cursor": GLib.Variant("b", False)}
+            args = GLib.Variant("(a{sv}h)", (opts, idx))
+            res = proxy.call_with_unix_fd_list_sync(
+                "CaptureWorkspace", args, Gio.DBusCallFlags.NONE, 3000, fds, None)
+            meta = res[0].unpack()[0]
+            if meta.get("type") != "raw":
+                return (None, None, 0, 0, 1.0)
+            w, h = int(meta["width"]), int(meta["height"])
+            stride = int(meta["stride"])
+            scale = float(meta.get("scale", 1.0)) or 1.0
+            f.seek(0)
+            raw = f.read(stride * h)
+        if len(raw) < stride * h:
+            return (None, None, 0, 0, 1.0)
+        # KWin raw is R,G,B,X; cairo FORMAT_ARGB32 is B,G,R,A on little-endian.
+        buf = bytearray(raw)
+        buf[0::4], buf[2::4] = buf[2::4], buf[0::4]
+        surf = cairo.ImageSurface.create_for_data(buf, cairo.FORMAT_ARGB32, w, h, stride)
+        return (surf, buf, w, h, scale)
+    except Exception:
+        return (None, None, 0, 0, 1.0)
+
+
 def joystick_keys_free(points, keep):
     used = {q.get("key") for q in points if q is not keep and q["type"] == "tap" and not q.get("mods")}
     used |= {k for q in points if q is not keep and q["type"] == "joystick" for k in q["keys"].values()}
@@ -88,6 +130,17 @@ class Overlay(Gtk.Window):
         self.pressed_idx = set()  # control indices held (HUD)
         self.visible_hud = False
         self.dim = False
+
+        # On KWin + NVIDIA GL, GTK4 transparent layer-shell windows lose their
+        # alpha and render as an opaque black canvas.  Capture the compositor's
+        # framebuffer now (before this window is mapped) and paint it as the
+        # editor's opaque background below the 45% dim scrim.
+        self.snapshot = None       # (surface, buffer, w, h, scale)
+        self.snapshot_rect = None  # (x, y, w, h) in snapshot pixels
+        if edit and getattr(app, "overlay_broken", False):
+            self.snapshot = capture_desktop_snapshot()
+            if self.snapshot[0] is not None:
+                self.snapshot_rect = self._monitor_snapshot_rect()
 
         self.add_css_class("key2touch-overlay")
         mon = find_monitor(self.output)
@@ -121,6 +174,24 @@ class Overlay(Gtk.Window):
             self.set_can_target(False)
             self.connect("realize", self._passthrough)
             self.connect("map", self._passthrough)
+
+    def _monitor_snapshot_rect(self):
+        # CaptureWorkspace covers the whole workspace; the editor is fullscreen
+        # on one monitor, so paint only that monitor's slice of the snapshot.
+        _, _, sw, sh, scale = self.snapshot
+        try:
+            mon = find_monitor(self.output)
+            if mon is not None:
+                g = mon.get_geometry()
+                x = max(0, int(g.x * scale))
+                y = max(0, int(g.y * scale))
+                w = min(int(g.width * scale), sw - x)
+                h = min(int(g.height * scale), sh - y)
+                if w > 0 and h > 0:
+                    return (x, y, w, h)
+        except Exception:
+            pass
+        return (0, 0, sw, sh)
 
     @property
     def points(self):
@@ -786,8 +857,23 @@ class Overlay(Gtk.Window):
     # ============================================================ drawing
     def draw(self, area, cr, w, h):
         if self.edit:
-            cr.set_source_rgba(0, 0, 0, 0.45)
-            cr.paint()
+            if self.snapshot is not None and self.snapshot[0] is not None:
+                # Opaque desktop copy first, then the dim scrim.  This is what
+                # a working alpha channel would have produced visually.
+                surf, _buf, _sw, _sh, _scale = self.snapshot
+                sx, sy, srw, srh = self.snapshot_rect
+                cr.save()
+                cr.scale(w / srw, h / srh)
+                cr.translate(-sx, -sy)
+                cr.set_source_surface(surf, 0, 0)
+                cr.paint()
+                cr.restore()
+                cr.set_source_rgba(0, 0, 0, 0.45)
+                cr.paint()
+            else:
+                # Compositors where window alpha works: transparent + scrim.
+                cr.set_source_rgba(0, 0, 0, 0.45)
+                cr.paint()
             alpha = 1.0
         else:
             if not self.visible_hud:

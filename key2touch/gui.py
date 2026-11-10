@@ -142,9 +142,10 @@ class Key2Touch(Adw.Application):
         self.hk_solo = False
         self.backend = desktop.detect()
         self.layer_shell = LS.is_supported()
-        # KWin + NVIDIA GL drops the alpha channel of GTK4 layer-shell
-        # transparent windows, so the HUD overlay renders as an opaque
-        # black canvas that the user cannot dismiss. Skip it entirely.
+        # KWin + NVIDIA GL drops the alpha channel of GTK4 layer-shell windows.
+        # The HUD (live game view) cannot use a static snapshot, so skip it.
+        # The layout editor instead paints a desktop snapshot as its opaque
+        # background (see overlay.capture_desktop_snapshot).
         self.overlay_broken = self._compositor_breaks_overlay()
         self.synced_after_start = False
 
