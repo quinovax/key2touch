@@ -1,7 +1,7 @@
 # key2touch: keyboard-to-touchscreen mapper for Wayland (Fedora RPM)
 # Upstream publishes no tagged tarballs yet; Source0 is a git snapshot of the commit below.
-%global commit e3272fec5d1a92a9b4ed8b9b906b01c0826bcf08
-%global snapdate 20261104
+%global commit 2e95ab61e0f6058e716e8faa60a5619743eea772
+%global snapdate 20261110
 %global appid io.github.shorin_kiwata.key2touch
 # python3_sitelib normally comes from python3-rpm-macros.  The fallback below
 # only expands when that macro package is absent: it asks the interpreter that
@@ -11,7 +11,7 @@
 
 Name:           key2touch
 Version:        %{snapdate}
-Release:        2%{?dist}
+Release:        1%{?dist}
 Summary:        Map keyboard keys to touchscreen input on Wayland
 License:        GPL-3.0-or-later
 URL:            https://github.com/SHORiN-KiWATA/key2touch
@@ -135,13 +135,20 @@ exit 0
 %{_modulesloaddir}/key2touch-uinput.conf
 
 %changelog
-* Sun Nov 08 2026 quinovax <quinovax@users.noreply.github.com> - 20261104-2
+* Tue Nov 10 2026 quinovax <quinovax@users.noreply.github.com> - 20261110-1
+- Paint a desktop snapshot (via KWin ScreenShot2) behind the layout editor
+  on KWin+NVIDIA, where GTK4 transparent layer-shell windows lose their alpha
+  and render as an opaque black canvas. HUD stays disabled there.
+
+* Sun Nov 08 2026 quinovax <quinovax@users.noreply.github.com> - 20261108-2
+- Don't create HUD overlay when profile has no points (prevents black
+  canvas on GTK4+KWin/NVIDIA compositors that drop window alpha).
 - Require libadwaita >= 1.5 (Adw.PreferencesDialog / Adw.AlertDialog) and
   gtk4-layer-shell >= 1.0, per a source audit of the GUI modules.
 - Replace the source-checkout launcher with a site-packages-aware wrapper so
   the shipped precompiled bytecode is actually used.
 
-* Sun Nov 08 2026 quinovax <quinovax@users.noreply.github.com> - 20261104-1
+* Sun Nov 08 2026 quinovax <quinovax@users.noreply.github.com> - 20261108-1
 - Initial Fedora packaging: git snapshot source; Python package installed to
   site-packages with build-time bytecode; udev rule granting /dev/uinput to
   the input group; modules-load.d for uinput; desktop entry + hicolor icon;
