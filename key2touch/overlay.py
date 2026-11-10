@@ -224,6 +224,7 @@ class Overlay(Gtk.Window):
         self.sel = None
         self.binding = None  # (idx, dir or None, sequence: bool)
         self.binding_new = False  # the point being bound was just created
+        self.session_points = []  # [(point, original_dict_or_None)] from this session
         self.mods_held = []
         self.mod_solo = False
         self.drag_orig = None
@@ -362,6 +363,7 @@ class Overlay(Gtk.Window):
         self.app.save_current()
         self.app.switch_profile(name)
         self.backup = copy.deepcopy(self.app.profile)
+        self.session_points = []  # points belong to the previous profile
         self._syncing = True
         self.prof_model.splice(0, self.prof_model.get_n_items(), self.app.profile_names())
         self._syncing = False
@@ -583,12 +585,15 @@ class Overlay(Gtk.Window):
             else:
                 self.start_binding(self.sel, None)
         else:
+            orig = dict(p)
             p.update(new_joystick(x, y))
             if joystick_keys_free(self.points, p):
                 self.refresh_panel()
             else:
                 p["keys"] = {d: None for d in JOY_DIRS}
+                self.session_points.append((p, orig))
                 self.start_binding(self.sel, JOY_DIRS[0], seq=True)
+                self.binding_new = True  # abandon -> restore the original point
         self.area.queue_draw()
         return False
 
@@ -695,11 +700,39 @@ class Overlay(Gtk.Window):
     def start_binding(self, i, d, seq=False, new=False):
         self.binding = (i, d, seq)
         self.binding_new = new
+        if new and not any(q is self.points[i] for q, _ in self.session_points):
+            self.session_points.append((self.points[i], None))
         self.mods_held.clear()
         self.mod_solo = False
         self.sel = i
         self.refresh_panel()
         self.area.queue_draw()
+
+    @staticmethod
+    def _incomplete(p):
+        """True when a point cannot drive any input: a joystick missing one of
+        its four directions, or a tap/skill with no key. A look needs no key."""
+        if p["type"] == "joystick":
+            return not all(p["keys"].get(k) for k in JOY_DIRS)
+        if p["type"] in KEYED:
+            return not p.get("key")
+        return False
+
+    def _rollback_incomplete(self, p):
+        """Discard a half-bound point created this session, or restore the
+        original dict when it came from converting an existing point."""
+        for q, orig in self.session_points:
+            if q is not p:
+                continue
+            if orig is None:
+                j = next((k for k, r in enumerate(self.points) if r is p), None)
+                if j is not None:
+                    del self.points[j]
+                self.sel = None
+            else:
+                p.clear()
+                p.update(orig)
+            return
 
     def cancel_binding(self):
         self.mods_held.clear()
@@ -708,9 +741,8 @@ class Overlay(Gtk.Window):
             return
         i = self.binding[0]
         self.binding = None
-        if self.binding_new and i < len(self.points) and not self.points[i].get("key"):
-            del self.points[i]
-            self.sel = None
+        if self.binding_new and i < len(self.points) and self._incomplete(self.points[i]):
+            self._rollback_incomplete(self.points[i])
         self.binding_new = False
         self.refresh_panel()
 
@@ -741,16 +773,21 @@ class Overlay(Gtk.Window):
         if d is not None:
             mods = []  # joystick directions are single keys
         self._steal(name, mods, p)
-        self.binding = None
-        self.binding_new = False
         if d is None:
             p["key"] = name
             p["mods"] = [m for m in MOD_ORDER if m in mods]
+            self.binding = None
+            self.binding_new = False
         else:
             p["keys"][d] = name
             nxt = JOY_DIRS.index(d) + 1
             if seq and nxt < len(JOY_DIRS):
+                # Keep binding_new set until every direction is bound, so
+                # abandoning a half-bound sequence drops the new point.
                 self.binding = (i, JOY_DIRS[nxt], True)
+            else:
+                self.binding = None
+                self.binding_new = False
         self.mods_held.clear()
         self.mod_solo = False
         self.refresh_panel()
@@ -845,10 +882,17 @@ class Overlay(Gtk.Window):
             self.select(i)
         else:
             p["keys"] = {d: None for d in JOY_DIRS}
-            self.start_binding(i, JOY_DIRS[0], seq=True)
+            self.start_binding(i, JOY_DIRS[0], seq=True, new=True)
 
     def finish(self, save):
         self.cancel_binding()
+        if save:
+            # Any point created/converted in this session that is still
+            # half-bound is invalid: drop it (or restore its original form)
+            # so key2touch check never reports an unbound joystick.
+            for p, _ in list(self.session_points):
+                if self._incomplete(p):
+                    self._rollback_incomplete(p)
         # Close first: if saving fails, a full-screen overlay holding the
         # keyboard exclusively must never be left behind.
         self.close()
