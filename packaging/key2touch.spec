@@ -1,6 +1,6 @@
 # key2touch: keyboard-to-touchscreen mapper for Wayland (Fedora RPM)
 # Upstream publishes no tagged tarballs yet; Source0 is a git snapshot of the commit below.
-%global commit 2e95ab61e0f6058e716e8faa60a5619743eea772
+%global commit 45d976e0a5df2140e3264e191c744991352aa0a9
 %global snapdate 20261110
 %global appid io.github.shorin_kiwata.key2touch
 # python3_sitelib normally comes from python3-rpm-macros.  The fallback below
@@ -11,7 +11,7 @@
 
 Name:           key2touch
 Version:        %{snapdate}
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Map keyboard keys to touchscreen input on Wayland
 License:        GPL-3.0-or-later
 URL:            https://github.com/SHORiN-KiWATA/key2touch
@@ -135,6 +135,12 @@ exit 0
 %{_modulesloaddir}/key2touch-uinput.conf
 
 %changelog
+* Tue Nov 10 2026 quinovax <quinovax@users.noreply.github.com> - 20261110-2
+- Drop half-bound joystick / tap points created in the layout editor when the
+  binding sequence is abandoned, instead of saving an unusable point that
+  makes key2touch check warn about unbound directions. Add 7 regression tests
+  for the editor binding state machine (63 tests total).
+
 * Tue Nov 10 2026 quinovax <quinovax@users.noreply.github.com> - 20261110-1
 - Paint a desktop snapshot (via KWin ScreenShot2) behind the layout editor
   on KWin+NVIDIA, where GTK4 transparent layer-shell windows lose their alpha
